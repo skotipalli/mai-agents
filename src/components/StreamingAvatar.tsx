@@ -32,13 +32,6 @@ function applyChromaKey(
   ctx.putImageData(imageData, 0, 0);
 }
 
-interface AvatarConfig {
-  avatarId: string;
-  voiceId: string;
-  quality: AvatarQuality;
-  emotion: VoiceEmotion;
-}
-
 interface Match {
   id: string;
   name: string;
@@ -46,37 +39,22 @@ interface Match {
   time: string;
 }
 
-const AVATAR_PRESETS: Record<string, AvatarConfig> = {
-  "Sports Anchor (Wayne)": {
-    avatarId: "Wayne_20240711",
-    voiceId: "1bd001e7e50f421d891986aad5158bc8",
-    quality: AvatarQuality.High,
-    emotion: VoiceEmotion.EXCITED,
-  },
-  "News Reporter (Anna)": {
-    avatarId: "Anna_public_3_20240108",
-    voiceId: "2d5b0e6cf36f460aa7fc47e3eee4ba54",
-    quality: AvatarQuality.High,
-    emotion: VoiceEmotion.BROADCASTER,
-  },
-  "Friendly Host (Josh)": {
-    avatarId: "josh_lite3_20230714",
-    voiceId: "131a436c47064f708210df6628ef8f32",
-    quality: AvatarQuality.High,
-    emotion: VoiceEmotion.FRIENDLY,
-  },
-  "Professional (Tyler)": {
-    avatarId: "Tyler-incasualsuit-20220721",
-    voiceId: "1bd001e7e50f421d891986aad5158bc8",
-    quality: AvatarQuality.High,
-    emotion: VoiceEmotion.SERIOUS,
-  },
-  "Casual Host (Kayla)": {
-    avatarId: "Kayla-incasualsuit-20220818",
-    voiceId: "2d5b0e6cf36f460aa7fc47e3eee4ba54",
-    quality: AvatarQuality.High,
-    emotion: VoiceEmotion.FRIENDLY,
-  },
+// Separate avatar options (visual appearance)
+const AVATARS: Record<string, { id: string; description: string }> = {
+  "Wayne (Male, Professional)": { id: "Wayne_20240711", description: "Professional male anchor" },
+  "Anna (Female, News)": { id: "Anna_public_3_20240108", description: "Female news reporter" },
+  "Josh (Male, Casual)": { id: "josh_lite3_20230714", description: "Friendly male host" },
+  "Tyler (Male, Suit)": { id: "Tyler-incasualsuit-20220721", description: "Professional in suit" },
+  "Kayla (Female, Casual)": { id: "Kayla-incasualsuit-20220818", description: "Casual female host" },
+};
+
+// Separate voice options (audio)
+const VOICES: Record<string, { id: string; emotion: VoiceEmotion; description: string }> = {
+  "Male - Excited": { id: "1bd001e7e50f421d891986aad5158bc8", emotion: VoiceEmotion.EXCITED, description: "Energetic male voice" },
+  "Female - Broadcaster": { id: "2d5b0e6cf36f460aa7fc47e3eee4ba54", emotion: VoiceEmotion.BROADCASTER, description: "Professional female voice" },
+  "Male - Friendly": { id: "131a436c47064f708210df6628ef8f32", emotion: VoiceEmotion.FRIENDLY, description: "Warm male voice" },
+  "Male - Serious": { id: "1bd001e7e50f421d891986aad5158bc8", emotion: VoiceEmotion.SERIOUS, description: "Authoritative male voice" },
+  "Female - Soothing": { id: "2d5b0e6cf36f460aa7fc47e3eee4ba54", emotion: VoiceEmotion.SOOTHING, description: "Calm female voice" },
 };
 
 // Sample matches - in production, fetch from Odds API
@@ -94,7 +72,8 @@ export default function StreamingAvatarComponent() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<Match>(SAMPLE_MATCHES[0]);
   const [scriptText, setScriptText] = useState("");
-  const [selectedPreset, setSelectedPreset] = useState("Sports Anchor (Wayne)");
+  const [selectedAvatar, setSelectedAvatar] = useState("Wayne (Male, Professional)");
+  const [selectedVoice, setSelectedVoice] = useState("Male - Excited");
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState<string[]>([]);
   const [removeGreenScreen, setRemoveGreenScreen] = useState(true);
@@ -180,10 +159,11 @@ export default function StreamingAvatarComponent() {
       const avatar = new StreamingAvatar({ token });
       avatarRef.current = avatar;
 
-      const preset = AVATAR_PRESETS[selectedPreset];
+      const avatarConfig = AVATARS[selectedAvatar];
+      const voiceConfig = VOICES[selectedVoice];
 
       // Set up event listeners
-      avatar.on(StreamingEvents.STREAM_READY, (event) => {
+      avatar.on(StreamingEvents.STREAM_READY, async (event) => {
         addDebug("Stream ready!");
         if (videoRef.current && event.detail) {
           videoRef.current.srcObject = event.detail;
@@ -191,6 +171,22 @@ export default function StreamingAvatarComponent() {
         }
         setIsSessionActive(true);
         setIsLoading(false);
+
+        // Auto-speak the script after a short delay
+        setTimeout(async () => {
+          if (avatarRef.current && scriptText.trim()) {
+            addDebug("Auto-speaking script...");
+            try {
+              await avatarRef.current.speak({
+                text: scriptText,
+                taskType: TaskType.REPEAT,
+              });
+              addDebug("Auto-speak started");
+            } catch (err) {
+              addDebug("Auto-speak failed");
+            }
+          }
+        }, 1000);
       });
 
       avatar.on(StreamingEvents.STREAM_DISCONNECTED, () => {
@@ -211,15 +207,15 @@ export default function StreamingAvatarComponent() {
         setIsSpeaking(false);
       });
 
-      addDebug(`Creating session with avatar: ${preset.avatarId}`);
+      addDebug(`Creating session with avatar: ${avatarConfig.id}, voice: ${selectedVoice}`);
 
       await avatar.createStartAvatar({
-        quality: preset.quality,
-        avatarName: preset.avatarId,
+        quality: AvatarQuality.High,
+        avatarName: avatarConfig.id,
         voice: {
-          voiceId: preset.voiceId,
+          voiceId: voiceConfig.id,
           rate: 1.0,
-          emotion: preset.emotion,
+          emotion: voiceConfig.emotion,
         },
         language: "en",
       });
@@ -310,13 +306,12 @@ export default function StreamingAvatarComponent() {
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
               <div className="absolute bottom-0 left-0 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl" />
 
-              {/* Hidden video element for stream source */}
+              {/* Video element for stream source (hidden when using chroma key, but NOT muted for audio) */}
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
-                muted
-                className={removeGreenScreen ? "hidden" : "w-full h-full object-contain relative z-10"}
+                className={removeGreenScreen ? "absolute w-1 h-1 opacity-0" : "w-full h-full object-contain relative z-10"}
               />
 
               {/* Canvas for chroma key output */}
@@ -380,23 +375,44 @@ export default function StreamingAvatarComponent() {
                 </select>
               </div>
 
-              {/* Avatar Selection */}
+              {/* Avatar Selection (Visual) */}
               <div>
                 <label className="block text-sm text-slate-400 mb-2">
-                  Select Avatar
+                  Select Avatar (Appearance)
                 </label>
                 <select
-                  value={selectedPreset}
-                  onChange={(e) => setSelectedPreset(e.target.value)}
+                  value={selectedAvatar}
+                  onChange={(e) => setSelectedAvatar(e.target.value)}
                   disabled={isSessionActive}
                   className="w-full bg-slate-700 text-white rounded-lg px-4 py-2 disabled:opacity-50"
                 >
-                  {Object.keys(AVATAR_PRESETS).map((preset) => (
-                    <option key={preset} value={preset}>
-                      {preset}
+                  {Object.entries(AVATARS).map(([name, config]) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-slate-500 mt-1">{AVATARS[selectedAvatar]?.description}</p>
+              </div>
+
+              {/* Voice Selection (Audio) */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Select Voice (Audio)
+                </label>
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => setSelectedVoice(e.target.value)}
+                  disabled={isSessionActive}
+                  className="w-full bg-slate-700 text-white rounded-lg px-4 py-2 disabled:opacity-50"
+                >
+                  {Object.entries(VOICES).map(([name, config]) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">{VOICES[selectedVoice]?.description}</p>
               </div>
 
               {/* Green screen toggle */}
