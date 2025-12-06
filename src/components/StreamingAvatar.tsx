@@ -8,6 +8,30 @@ import StreamingAvatar, {
   VoiceEmotion,
 } from "@heygen/streaming-avatar";
 
+// Chroma key function to remove green screen
+function applyChromaKey(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  threshold: number = 100
+) {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const red = data[i];
+    const green = data[i + 1];
+    const blue = data[i + 2];
+
+    // Detect green screen pixels
+    if (green > threshold && red < threshold && blue < threshold) {
+      data[i + 3] = 0; // Set alpha to transparent
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
 interface AvatarConfig {
   avatarId: string;
   voiceId: string;
@@ -15,44 +39,124 @@ interface AvatarConfig {
   emotion: VoiceEmotion;
 }
 
+interface Match {
+  id: string;
+  name: string;
+  sport: string;
+  time: string;
+}
+
 const AVATAR_PRESETS: Record<string, AvatarConfig> = {
-  "Sports Anchor": {
+  "Sports Anchor (Wayne)": {
     avatarId: "Wayne_20240711",
     voiceId: "1bd001e7e50f421d891986aad5158bc8",
     quality: AvatarQuality.High,
     emotion: VoiceEmotion.EXCITED,
   },
-  "News Reporter": {
+  "News Reporter (Anna)": {
     avatarId: "Anna_public_3_20240108",
     voiceId: "2d5b0e6cf36f460aa7fc47e3eee4ba54",
     quality: AvatarQuality.High,
     emotion: VoiceEmotion.BROADCASTER,
   },
-  "Friendly Host": {
+  "Friendly Host (Josh)": {
     avatarId: "josh_lite3_20230714",
     voiceId: "131a436c47064f708210df6628ef8f32",
     quality: AvatarQuality.High,
     emotion: VoiceEmotion.FRIENDLY,
   },
+  "Professional (Tyler)": {
+    avatarId: "Tyler-incasualsuit-20220721",
+    voiceId: "1bd001e7e50f421d891986aad5158bc8",
+    quality: AvatarQuality.High,
+    emotion: VoiceEmotion.SERIOUS,
+  },
+  "Casual Host (Kayla)": {
+    avatarId: "Kayla-incasualsuit-20220818",
+    voiceId: "2d5b0e6cf36f460aa7fc47e3eee4ba54",
+    quality: AvatarQuality.High,
+    emotion: VoiceEmotion.FRIENDLY,
+  },
 };
+
+// Sample matches - in production, fetch from Odds API
+const SAMPLE_MATCHES: Match[] = [
+  { id: "1", name: "Lakers vs Celtics", sport: "NBA", time: "Tonight 7:30 PM" },
+  { id: "2", name: "Chiefs vs Bills", sport: "NFL", time: "Sunday 4:25 PM" },
+  { id: "3", name: "Man City vs Liverpool", sport: "Premier League", time: "Saturday 12:30 PM" },
+  { id: "4", name: "Yankees vs Red Sox", sport: "MLB", time: "Tomorrow 7:05 PM" },
+  { id: "5", name: "India vs Australia", sport: "Cricket", time: "Friday 9:30 AM" },
+];
 
 export default function StreamingAvatarComponent() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [scriptText, setScriptText] = useState(
-    "Welcome to AI Sports News! I'm your virtual anchor, bringing you the latest updates and analysis. The Lakers are facing the Celtics tonight in what promises to be an epic showdown..."
-  );
-  const [selectedPreset, setSelectedPreset] = useState("Sports Anchor");
+  const [selectedMatch, setSelectedMatch] = useState<Match>(SAMPLE_MATCHES[0]);
+  const [scriptText, setScriptText] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState("Sports Anchor (Wayne)");
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState<string[]>([]);
+  const [removeGreenScreen, setRemoveGreenScreen] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const avatarRef = useRef<StreamingAvatar | null>(null);
+  const animationRef = useRef<number | null>(null);
+
+  // Generate script based on selected match
+  useEffect(() => {
+    const match = selectedMatch;
+    setScriptText(
+      `Welcome to AI Sports News! I'm bringing you the latest on tonight's big matchup. ` +
+      `The ${match.name} game is set for ${match.time}. ` +
+      `This ${match.sport} showdown promises to be an exciting one. ` +
+      `Both teams have been performing well this season, and fans are expecting a close contest. ` +
+      `Stay tuned for live updates and analysis right here on your AI Sports Channel.`
+    );
+  }, [selectedMatch]);
 
   const addDebug = useCallback((msg: string) => {
     setDebug((prev) => [...prev.slice(-9), `${new Date().toLocaleTimeString()}: ${msg}`]);
   }, []);
+
+  // Chroma key rendering loop
+  const renderChromaKey = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.paused || video.ended) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Match canvas size to video
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+    }
+
+    // Draw video frame to canvas
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Apply chroma key if enabled
+    if (removeGreenScreen) {
+      applyChromaKey(ctx, canvas.width, canvas.height, 90);
+    }
+
+    animationRef.current = requestAnimationFrame(renderChromaKey);
+  }, [removeGreenScreen]);
+
+  // Start/stop chroma key rendering
+  useEffect(() => {
+    if (isSessionActive && removeGreenScreen) {
+      animationRef.current = requestAnimationFrame(renderChromaKey);
+    }
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isSessionActive, removeGreenScreen, renderChromaKey]);
 
   const fetchAccessToken = async (): Promise<string> => {
     const response = await fetch("/api/heygen", { method: "POST" });
@@ -199,12 +303,26 @@ export default function StreamingAvatarComponent() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Video Panel */}
           <div className="bg-slate-800 rounded-2xl p-6 shadow-2xl">
-            <div className="aspect-video bg-black rounded-xl overflow-hidden relative">
+            {/* Video container with studio background */}
+            <div className="aspect-video bg-gradient-to-b from-blue-900 via-slate-800 to-slate-900 rounded-xl overflow-hidden relative">
+              {/* News studio background */}
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-900/80 via-slate-800 to-slate-900" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
+              <div className="absolute bottom-0 left-0 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl" />
+
+              {/* Hidden video element for stream source */}
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
-                className="w-full h-full object-cover"
+                muted
+                className={removeGreenScreen ? "hidden" : "w-full h-full object-contain relative z-10"}
+              />
+
+              {/* Canvas for chroma key output */}
+              <canvas
+                ref={canvasRef}
+                className={removeGreenScreen ? "w-full h-full object-contain relative z-10" : "hidden"}
               />
               {!isSessionActive && !isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -227,13 +345,45 @@ export default function StreamingAvatarComponent() {
                   LIVE
                 </div>
               )}
+              {/* Match ticker */}
+              {isSessionActive && (
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-r from-blue-900 to-blue-800 text-white px-4 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold">{selectedMatch.sport}</span>
+                    <span>{selectedMatch.name}</span>
+                    <span className="text-blue-300">{selectedMatch.time}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Controls */}
             <div className="mt-6 space-y-4">
+              {/* Match Selection */}
               <div>
                 <label className="block text-sm text-slate-400 mb-2">
-                  Select Anchor Style
+                  Select Match
+                </label>
+                <select
+                  value={selectedMatch.id}
+                  onChange={(e) => {
+                    const match = SAMPLE_MATCHES.find(m => m.id === e.target.value);
+                    if (match) setSelectedMatch(match);
+                  }}
+                  className="w-full bg-slate-700 text-white rounded-lg px-4 py-2"
+                >
+                  {SAMPLE_MATCHES.map((match) => (
+                    <option key={match.id} value={match.id}>
+                      {match.sport}: {match.name} - {match.time}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Avatar Selection */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Select Avatar
                 </label>
                 <select
                   value={selectedPreset}
@@ -247,6 +397,20 @@ export default function StreamingAvatarComponent() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Green screen toggle */}
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="removeGreenScreen"
+                  checked={removeGreenScreen}
+                  onChange={(e) => setRemoveGreenScreen(e.target.checked)}
+                  className="w-4 h-4 rounded"
+                />
+                <label htmlFor="removeGreenScreen" className="text-sm text-slate-400">
+                  Remove green screen background
+                </label>
               </div>
 
               <div className="flex gap-4">
